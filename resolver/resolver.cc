@@ -424,7 +424,8 @@ private:
                 job.klass.data(ctx)->setSuperClass(resolved);
             } else {
                 if (auto e = ctx.state.beginError(job.ancestor->loc, core::errors::Resolver::RedefinitionOfParents)) {
-                    e.setHeader("Class parents redefined for class `{}`", job.klass.data(ctx)->show(ctx));
+                    e.setHeader("Parent of class `{}` redefined from `{}` to `{}`", job.klass.data(ctx)->show(ctx),
+                                job.klass.data(ctx)->superClass().show(ctx), resolved.show(ctx));
                 }
             }
         } else {
@@ -1414,7 +1415,7 @@ private:
         if (uid->kind == ast::UnresolvedIdent::Class) {
             if (!ctx.owner.data(ctx)->isClass()) {
                 if (auto e = ctx.state.beginError(uid->loc, core::errors::Resolver::InvalidDeclareVariables)) {
-                    e.setHeader("Class variables must be declared at class scope");
+                    e.setHeader("The class variable `{}` must be declared at class scope", uid->name.show(ctx));
                 }
             }
 
@@ -1430,13 +1431,15 @@ private:
                        !core::Types::isSubType(ctx, core::Types::nilClass(), cast->type)) {
                 // Declaring a class instance variable in a static method
                 if (auto e = ctx.state.beginError(uid->loc, core::errors::Resolver::InvalidDeclareVariables)) {
-                    e.setHeader(
-                        "Singleton instance variables must be declared inside the class body or declared nilable");
+                    e.setHeader("The singleton instance variable `{}` must be declared inside the class body or "
+                                "declared nilable",
+                                uid->name.show(ctx));
                 }
             } else if (!core::Types::isSubType(ctx, core::Types::nilClass(), cast->type)) {
                 // Inside a method; declaring a normal instance variable
                 if (auto e = ctx.state.beginError(uid->loc, core::errors::Resolver::InvalidDeclareVariables)) {
-                    e.setHeader("Instance variables must be declared inside `initialize` or declared nilable");
+                    e.setHeader("The instance variable `{}` must be declared inside `{}` or declared nilable",
+                                uid->name.show(ctx), "initialize");
                 }
             }
             scope = ctx.selfClass();

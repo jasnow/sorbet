@@ -422,6 +422,46 @@ If a location should not report any definition or usage, then use the magic labe
 # ^ def: (nothing)
 ```
 
+#### Testing "Go to Type Definition"
+
+This is somewhat similar to "Find Definition" above, but also slightly different
+because there's no analogue of "Find All Type Definitions."
+
+```ruby
+class A; end
+#     ^ type-def: some-label
+
+aaa = A.new
+# ^ type: some-label
+```
+
+The `type: some-label` assertion says "please simulate a Go to Type Definition
+here, named `some-label`" and the `type-def: some-label` assertion says "assert
+that the results for `some-label` are exactly these locations."
+
+That means if the type definition could return multiple locs, the assertions
+will have to cover all results:
+
+```ruby
+class A; end
+#     ^ type-def: AorB
+class B; end
+#     ^ type-def: AorB
+
+aaa = T.let(A.new, T.any(A, B))
+# ^ type: AorB
+```
+
+If a location should not report any definition or usage, then use the magic
+label `(nothing)`:
+
+```ruby
+# typed: false
+class A; end
+aaa = A.new
+# ^ def: (nothing)
+```
+
 #### Testing hover
 
 LSP tests can also assert the contents of hover responses with `hover` assertions:
@@ -481,6 +521,24 @@ tools/scripts/update_exp_files.sh
 
 You will probably want to look through the changes and `git checkout` any files
 with changes that you believe are actually bugs in your code and fix your code.
+
+`update_exp_files.sh` updates every snapshot file kind known to Sorbet. This can
+be slow, depending on what needs to be recompiled and updated. Some faster
+commands:
+
+```bash
+# Only update the `*.exp` files in `test/testdata`
+tools/scripts/update_testdata_exp.sh
+
+# Only update the `*.exp` files in `test/testdata/cfg`
+tools/scripts/update_testdata_exp.sh test/testdata/cfg
+
+# Only update a single exp file's test:
+tools/scripts/update_testdata_exp.sh test/testdata/cfg/next.rb
+
+# Only update the `*.out` files in `test/cli`
+bazel test //test/cli:update
+```
 
 
 ## C++ conventions

@@ -88,7 +88,7 @@ public:
         static constexpr u4 METHOD_OVERRIDABLE = 0x0000'0400;
         static constexpr u4 METHOD_FINAL = 0x0000'0800;
         static constexpr u4 METHOD_OVERRIDE = 0x0000'1000;
-        static constexpr u4 METHOD_IMPLEMENTATION = 0x0000'2000;
+        [[deprecated]] static constexpr u4 METHOD_IMPLEMENTATION = 0x0000'2000;
         static constexpr u4 METHOD_INCOMPATIBLE_OVERRIDE = 0x0000'4000;
 
         // Type flags
@@ -107,6 +107,7 @@ public:
 
     u4 hash(const GlobalState &gs) const;
     u4 methodShapeHash(const GlobalState &gs) const;
+    std::vector<u4> methodArgumentHash(const GlobalState &gs) const;
 
     std::vector<TypePtr> selfTypeArgs(const GlobalState &gs) const;
 
@@ -190,11 +191,6 @@ public:
     inline bool isAbstract() const {
         ENFORCE(isMethod());
         return (flags & Symbol::Flags::METHOD_ABSTRACT) != 0;
-    }
-
-    inline bool isImplementation() const {
-        ENFORCE(isMethod());
-        return (flags & Symbol::Flags::METHOD_IMPLEMENTATION) != 0;
     }
 
     inline bool isIncompatibleOverride() const {
@@ -382,11 +378,6 @@ public:
     inline void setAbstract() {
         ENFORCE(isMethod());
         flags |= Symbol::Flags::METHOD_ABSTRACT;
-    }
-
-    inline void setImplementation() {
-        ENFORCE(isMethod());
-        flags |= Symbol::Flags::METHOD_IMPLEMENTATION;
     }
 
     inline void setIncompatibleOverride() {

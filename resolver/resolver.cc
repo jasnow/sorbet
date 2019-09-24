@@ -453,7 +453,7 @@ private:
             }
         } else {
             ENFORCE(resolved.data(ctx)->isClassOrModule());
-            job.klass.data(ctx)->mixins().emplace_back(resolved);
+            job.klass.data(ctx)->addMixin(resolved);
         }
 
         return true;
@@ -467,9 +467,6 @@ private:
             return;
         }
         Timer timeit(ctx.state.errorQueue->logger, "resolver.registerSealedSubclass");
-
-        // TODO(jez) Would it ever make sense to put an AppliedType into the union?
-        // TODO(jez) Do we want to make sure that the child class doesn't have any type members?
 
         ancestorSym.data(ctx)->recordSealedSubclass(ctx, job.klass);
     }
@@ -1145,8 +1142,8 @@ private:
         ast::InsSeq::STATS_store lets;
 
         if (mdef->symbol.data(ctx)->isAbstract()) {
-            // TODO(jez) Check that abstract methods don't have defined bodies earlier (currently done in infer)
-            // so that we can unblock checking default arguments of abstract methods
+            // If we checked that abstract methods don't have defined bodies earlier (currently done in infer)
+            // we could also use this technique to check default arguments of abstract methods.
             return;
         }
 
@@ -1841,6 +1838,7 @@ vector<ast::ParsedFile> Resolver::runTreePasses(core::MutableContext ctx, vector
     auto workers = WorkerPool::create(0, ctx.state.tracer());
     trees = ResolveConstantsWalk::resolveConstants(ctx, std::move(trees), *workers);
     trees = resolveMixesInClassMethods(ctx, std::move(trees));
+    computeLinearization(ctx.state);
     trees = resolveTypeParams(ctx, std::move(trees));
     trees = resolveSigs(ctx, std::move(trees));
     sanityCheck(ctx, trees);

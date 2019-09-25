@@ -19,8 +19,9 @@ string methodInfoString(const core::GlobalState &gs, const core::TypePtr &retTyp
                 contents += "\n";
             }
             contents = absl::StrCat(
-                contents, methodDetail(gs, dispatchComponent.method, dispatchComponent.receiver, retType, constraint),
-                "\n", methodDefinition(gs, dispatchComponent.method));
+                contents,
+                methodDetail(gs, dispatchComponent.method, dispatchComponent.receiver, retType, constraint.get()), "\n",
+                methodDefinition(gs, dispatchComponent.method));
         }
         start = start->secondary.get();
     }
@@ -89,9 +90,15 @@ LSPResult LSPLoop::handleTextDocumentHover(unique_ptr<core::GlobalState> gs, con
             if (constraint) {
                 retType = core::Types::instantiate(core::Context(*gs, core::Symbols::root()), retType, *constraint);
             }
-            auto methodInfo = methodInfoString(*gs, retType, *sendResp->dispatchResult, constraint);
+            string typeString;
+            if (sendResp->dispatchResult->main.method.exists() && sendResp->dispatchResult->main.method.isSynthetic()) {
+                // For synthetic methods, just show the return type
+                typeString = retType->showWithMoreInfo(*gs);
+            } else {
+                typeString = methodInfoString(*gs, retType, *sendResp->dispatchResult, constraint);
+            }
             response->result =
-                make_unique<Hover>(formatHoverText(config.clientHoverMarkupKind, methodInfo, documentation));
+                make_unique<Hover>(formatHoverText(config.clientHoverMarkupKind, typeString, documentation));
         } else if (auto defResp = resp->isDefinition()) {
             string typeString =
                 absl::StrCat(methodDetail(*gs, defResp->symbol, nullptr, defResp->retType.type, nullptr), "\n",

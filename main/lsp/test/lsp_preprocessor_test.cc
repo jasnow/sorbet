@@ -19,7 +19,6 @@ options::Options makeOptions(string_view rootPath) {
     options::Options opts;
     opts.rawInputDirNames.emplace_back(string(rootPath));
     opts.runLSP = true;
-    opts.lspCancelableSlowPathEnabled = true;
     opts.fs = make_shared<sorbet::test::MockFileSystem>(rootPath);
     return opts;
 }
@@ -466,7 +465,7 @@ u4 emulateProcessEditAtHeadOfQueue(QueueState &state, core::GlobalState &gs) {
     // Emulate typechecking thread: begin 'processing' this edit.
     const auto updates = getUpdates(state, 0).value();
     auto epoch = updates->versionEnd;
-    gs.startCommitEpoch(epoch);
+    gs.startCommitEpoch(updates->versionStart - 1, epoch);
     state.pendingRequests.clear();
     return epoch;
 }
@@ -492,29 +491,6 @@ TEST(SlowPathCancelation, CancelsRunningSlowPathWhenFastPathEditComesIn) { // NO
 
     // GS should no longer register a cancellation, since the epoch didn't commit.
     EXPECT_FALSE(gs->wasTypecheckingCanceled());
-}
-
-TEST(SlowPathCancelation, DoesNotCancelsRunningSlowPathWhenFeatureIsDisabled) { // NOLINT
-    QueueState state;
-    absl::Mutex mtx;
-    auto options = makeOptions("");
-    options.lspCancelableSlowPathEnabled = false;
-    auto config = makeConfig(options);
-    auto preprocessor = makePreprocessor(config);
-    unique_ptr<core::GlobalState> gs = initCancelSlowPathTest(preprocessor, state, mtx);
-
-    // Introduce a syntax error, which causes a slow path.
-    string fooV2 = "# typed: true\n{def foo; end";
-    preprocessor.preprocessAndEnqueue(state, makeChange("foo.rb", 2, fooV2), mtx);
-    u4 epoch = emulateProcessEditAtHeadOfQueue(state, *gs);
-
-    // Introduce a fix to syntax error. Should course-correct to a fast path -- but only if feature is enabled!
-    string fooV3 = "# typed: true\ndef foo; end";
-    preprocessor.preprocessAndEnqueue(state, makeChange("foo.rb", 3, fooV3), mtx);
-    EXPECT_FALSE(gs->wasTypecheckingCanceled());
-
-    // Processor thread: Try to typecheck. Should *not* cancel.
-    EXPECT_TRUE(gs->tryCommitEpoch(epoch, true, []() -> void {}));
 }
 
 TEST(SlowPathCancelation, DoesNotCancelRunningSlowPathWhenSlowPathEditComesIn) { // NOLINT
@@ -614,6 +590,46 @@ TEST(SlowPathCancelation, PruneDuringVersionRollover) { // NOLINT
 
     EXPECT_EQ(foo->source(), fooV3);
     EXPECT_EQ(bar->source(), barV2);
+}
+
+TEST(SlowPathCancelation, DoesNotIncludeOldEditsInCombinedEdit) { // NOLINT
+    auto preprocessor = makePreprocessor();
+    QueueState state;
+    absl::Mutex mtx;
+    // Defines foo.rb.
+    unique_ptr<core::GlobalState> gs = initCancelSlowPathTest(preprocessor, state, mtx);
+    // Define bar.rb.
+    preprocessor.preprocessAndEnqueue(state, makeOpen("bar.rb", 1, "# typed: true\ndef bar; 99999; end"), mtx);
+    // 'process' those messages.
+    state.pendingRequests.clear();
+
+    // Fast path bar.rb update.
+    string barV2 = "# typed: true\ndef bar; end";
+    preprocessor.preprocessAndEnqueue(state, makeChange("bar.rb", 2, barV2), mtx);
+    // Hover request: Blocking.
+    preprocessor.preprocessAndEnqueue(state, makeHoverReq(10, "foo.rb"), mtx);
+
+    // Slow path foo.rb update (parse error)
+    string fooV3 = "# typed: true\ndef {foo; 1; end";
+    preprocessor.preprocessAndEnqueue(state, makeChange("foo.rb", 3, fooV3), mtx);
+
+    // 'process' first two messages
+    state.pendingRequests.pop_front();
+    state.pendingRequests.pop_front();
+    // Emulate typechecking thread typechecking slow path in parallel.
+    emulateProcessEditAtHeadOfQueue(state, *gs);
+
+    // New edit: Fixes parse error, and cancels running slow path.
+    string fooV4 = "# typed: true\ndef foo; 1; end";
+    preprocessor.preprocessAndEnqueue(state, makeChange("foo.rb", 4, fooV4), mtx);
+
+    EXPECT_TRUE(gs->wasTypecheckingCanceled());
+
+    auto updates = getUpdates(state, 0).value();
+
+    // Mega update should *not* contain `bar.rb` update.
+    ASSERT_EQ(1, updates->updatedFiles.size());
+    ASSERT_EQ(updates->updatedFiles[0]->source(), fooV4);
 }
 
 } // namespace sorbet::realmain::lsp::test

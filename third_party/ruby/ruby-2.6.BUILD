@@ -97,13 +97,14 @@ cc_library(
         "*.inc",
         "enc/shift_jis.c",
         "enc/jis/*.h",
+        "ccan/**/*.h",
     ]),
     includes = [
         "enc",
         "enc/trans",
         "enc/unicode/12.1.0",
     ],
-    visibility = [ "//visibility:private" ],
+    visibility = [ "//visibility:public" ],
 )
 
 cc_library(
@@ -117,7 +118,7 @@ cc_library(
     ":darwin": [],
   }),
   deps = [ ":ruby_headers" ],
-  visibility = [ "//visibility:private" ],
+  visibility = [ "//visibility:public" ],
 )
 
 RUBY_COPTS = [
@@ -147,7 +148,7 @@ cc_library(
     hdrs = [
         "coroutine/amd64/Context.h",
     ],
-    visibility = [ "//visibility:private" ],
+    visibility = [ "//visibility:public" ],
 )
 
 
@@ -265,9 +266,7 @@ cc_binary(
           "missing/strlcat.c",
       ],
       ":darwin": [],
-    }) + glob([
-        "ccan/**/*.h",
-    ]),
+    }),
 
     deps = [
         ":miniruby_private_headers",
@@ -503,9 +502,7 @@ cc_binary(
             "missing/strlcat.c",
         ],
         ":darwin": [],
-    }) + glob([
-        "ccan/**/*.h",
-    ]),
+    }),
 
     deps = [
         ":miniruby_private_headers",
@@ -1191,7 +1188,7 @@ filegroup(
 
         RBCONFIG,
 
-    visibility = ["//visibility:private"],
+    visibility = ["//visibility:public"],
 )
 
 

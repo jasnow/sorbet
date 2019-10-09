@@ -258,6 +258,13 @@ public:
                 }
             } else {
                 klass->symbol.data(ctx)->setIsModule(isModule);
+                auto renamed = ctx.state.findRenamedSymbol(klass->symbol.data(ctx)->owner, klass->symbol);
+                if (renamed.exists()) {
+                    if (auto e = ctx.state.beginError(klass->loc, core::errors::Namer::ModuleKindRedefinition)) {
+                        e.setHeader("Redefining constant `{}`", klass->symbol.data(ctx)->show(ctx));
+                        e.addErrorLine(renamed.data(ctx)->loc(), "Previous definition");
+                    }
+                }
             }
         }
         return klass;
@@ -820,13 +827,9 @@ public:
             }
             sym = ctx.state.enterTypeMember(asgn->loc, onSymbol, typeName->cnst, variance);
 
-            // Ensure that every type member has a LambdaParam with bounds, but give
-            // both bounds as T.untyped. The reason for this is that the bounds will
-            // be fixed up in the resolver, but if the type is used out of order (as
-            // in test/testdata/todo/fixed_ordering.rb) `T.untyped` will be used for
-            // the value of the type, instead of `<any>`
-            auto untyped = core::Types::untyped(ctx, sym);
-            sym.data(ctx)->resultType = core::make_type<core::LambdaParam>(sym, untyped, untyped);
+            // The todo bounds will be fixed by the resolver in ResolveTypeParamsWalk.
+            auto todo = core::make_type<core::ClassType>(core::Symbols::todo());
+            sym.data(ctx)->resultType = core::make_type<core::LambdaParam>(sym, todo, todo);
 
             if (isTypeTemplate) {
                 auto context = ctx.owner.data(ctx)->enclosingClass(ctx);

@@ -127,22 +127,22 @@ public:
 
     // These methods are here to make it easier to print the symbol table in lldb.
     // (don't have to remember the default args)
-    std::string toString() {
+    std::string toString() const {
         bool showFull = false;
         bool showRaw = false;
         return toStringWithOptions(showFull, showRaw);
     }
-    std::string toStringFull() {
+    std::string toStringFull() const {
         bool showFull = true;
         bool showRaw = false;
         return toStringWithOptions(showFull, showRaw);
     }
-    std::string showRaw() {
+    std::string showRaw() const {
         bool showFull = false;
         bool showRaw = true;
         return toStringWithOptions(showFull, showRaw);
     }
-    std::string showRawFull() {
+    std::string showRawFull() const {
         bool showFull = true;
         bool showRaw = true;
         return toStringWithOptions(showFull, showRaw);
@@ -174,6 +174,8 @@ public:
     // (hint: probably you want to find an alternate solution)
     bool runningUnderAutogen = false;
     bool censorForSnapshotTests = false;
+
+    bool sleepInSlowPath = false;
 
     std::unique_ptr<GlobalState> deepCopy(bool keepId = false) const;
     mutable std::shared_ptr<ErrorQueue> errorQueue;

@@ -376,9 +376,9 @@ module Etc
   # #=> #<struct Etc::Passwd name="root", passwd="x", uid=0, gid=0, gecos="root",dir="/root", shell="/bin/bash">
   # ```
   sig do
-    params(uid: String).returns(T.nilable(Etc::Passwd))
+    params(uid: Integer).returns(T.nilable(Etc::Passwd))
   end
-  def self.getpwuid(uid); end
+  def self.getpwuid(uid=T.unsafe(nil)); end
 
   # Provides a convenient Ruby iterator which executes a block for each entry in
   # the /etc/group file.

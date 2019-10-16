@@ -27,6 +27,13 @@ bool sanityCheckUpdate(const core::GlobalState &gs, const LSPFileUpdates &update
     }
     return true;
 }
+
+void cancelTimer(std::unique_ptr<Timer> &timer) {
+    // Protect against nullptrs.
+    if (timer) {
+        timer->cancel();
+    }
+}
 } // namespace
 
 LSPPreprocessor::LSPPreprocessor(unique_ptr<core::GlobalState> initialGS, LSPConfiguration config, WorkerPool &workers,
@@ -70,11 +77,10 @@ void LSPPreprocessor::mergeFileChanges(absl::Mutex &mtx, QueueState &state) {
                 }
             }
 
-            // Merge updates, timers, and tracers.
+            // Merge updates and tracers, and cancel its timer to avoid a distorted latency metric.
             auto &mergeableParams = get<unique_ptr<SorbetWorkspaceEditParams>>(mergeMsg.asNotification().params);
             mergeEdits(msgParams->updates, mergeableParams->updates);
-            msg.timers.insert(msg.timers.end(), make_move_iterator(mergeMsg.timers.begin()),
-                              make_move_iterator(mergeMsg.timers.end()));
+            cancelTimer(msg.timer);
             msg.startTracers.insert(msg.startTracers.end(), mergeMsg.startTracers.begin(), mergeMsg.startTracers.end());
             // Delete the update we just merged and move on to next item.
             it = pendingRequests.erase(it);
@@ -99,9 +105,20 @@ void LSPPreprocessor::mergeFileChanges(absl::Mutex &mtx, QueueState &state) {
                     Timer timeit(logger, "tryCancelSlowPath");
                     auto &params = get<unique_ptr<SorbetWorkspaceEditParams>>(msg->asNotification().params);
                     auto combinedUpdates = ttgs.getCombinedUpdates(committed + 1, params->updates.versionEnd);
-                    if (combinedUpdates.canTakeFastPath && gs.tryCancelSlowPath(params->updates.versionEnd)) {
-                        logger->debug("[Preprocessor] Canceling typechecking, as edits {} thru {} can take fast path.",
-                                      params->updates.versionStart, params->updates.versionEnd);
+                    // Cancel if combined updates end up taking the fast path, or if the new updates will just take the
+                    // slow path a second time when the current slow path finishes.
+                    if ((combinedUpdates.canTakeFastPath || !params->updates.canTakeFastPath) &&
+                        gs.tryCancelSlowPath(params->updates.versionEnd)) {
+                        if (combinedUpdates.canTakeFastPath) {
+                            logger->debug(
+                                "[Preprocessor] Canceling typechecking, as edits {} thru {} can take fast path.",
+                                combinedUpdates.versionStart, combinedUpdates.versionEnd);
+                        } else {
+                            logger->debug(
+                                "[Preprocessor] Canceling typechecking, as new edits {} thru {} will just take "
+                                "the slow path again.",
+                                params->updates.versionStart, params->updates.versionEnd);
+                        }
                         params->updates = move(combinedUpdates);
                     }
                     break;
@@ -124,6 +141,8 @@ void cancelRequest(std::deque<std::unique_ptr<LSPMessage>> &pendingRequests, con
             if (request.id == cancelParams.id) {
                 // We didn't start processing it yet -- great! Cancel it and return.
                 current->canceled = true;
+                // Don't report a latency metric for canceled requests.
+                cancelTimer(current->timer);
                 return;
             }
         }
@@ -146,7 +165,7 @@ unique_ptr<LSPMessage> LSPPreprocessor::makeAndCommitWorkspaceEdit(unique_ptr<So
     }
     auto newMsg =
         make_unique<LSPMessage>(make_unique<NotificationMessage>("2.0", LSPMethod::SorbetWorkspaceEdit, move(params)));
-    newMsg->timers = move(oldMsg->timers);
+    newMsg->timer = move(oldMsg->timer);
     newMsg->startTracers = move(oldMsg->startTracers);
     return newMsg;
 }

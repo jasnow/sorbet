@@ -1,6 +1,7 @@
 #include "main/lsp/LSPPreprocessor.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_replace.h"
+#include "main/lsp/ShowOperation.h"
 #include "main/lsp/lsp.h"
 #include "main/pipeline/pipeline.h"
 
@@ -28,12 +29,26 @@ bool sanityCheckUpdate(const core::GlobalState &gs, const LSPFileUpdates &update
     return true;
 }
 
-void cancelTimer(std::unique_ptr<Timer> &timer) {
+void cancelTimer(unique_ptr<Timer> &timer) {
     // Protect against nullptrs.
     if (timer) {
         timer->cancel();
     }
 }
+
+class QueueOutput final : public LSPOutput {
+private:
+    absl::Mutex &mtx;
+    deque<unique_ptr<LSPMessage>> &queue;
+
+public:
+    QueueOutput(absl::Mutex &mtx, deque<unique_ptr<LSPMessage>> &queue) : mtx(mtx), queue(queue) {}
+    void rawWrite(unique_ptr<LSPMessage> msg) override {
+        absl::MutexLock lck(&this->mtx);
+        this->queue.push_back(move(msg));
+    }
+};
+
 } // namespace
 
 LSPPreprocessor::LSPPreprocessor(unique_ptr<core::GlobalState> initialGS, LSPConfiguration config, WorkerPool &workers,
@@ -118,6 +133,7 @@ void LSPPreprocessor::mergeFileChanges(absl::Mutex &mtx, QueueState &state) {
                                 "[Preprocessor] Canceling typechecking, as new edits {} thru {} will just take "
                                 "the slow path again.",
                                 params->updates.versionStart, params->updates.versionEnd);
+                            combinedUpdates.updatedGS = getTypecheckingGS();
                         }
                         params->updates = move(combinedUpdates);
                     }
@@ -224,8 +240,8 @@ void LSPPreprocessor::preprocessAndEnqueue(QueueState &state, unique_ptr<LSPMess
             InitializedParams &params = *get<unique_ptr<InitializedParams>>(msg->asNotification().params);
             {
                 Timer timeit(logger, "initial_index");
-                ShowOperationPreprocessorThread op(config, stateMtx, state.pendingRequests, "Indexing",
-                                                   "Indexing files...");
+                QueueOutput output(stateMtx, state.pendingRequests);
+                ShowOperation op(output, config, "Indexing", "Indexing files...");
                 params.updates.updatedFileIndexes = ttgs.indexFromFileSystem();
                 params.updates.updatedFileHashes = ttgs.getGlobalStateHashes();
             }

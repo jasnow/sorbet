@@ -78,7 +78,7 @@ class NameInserter {
             // TODO: check that flags match;
             unique_ptr<ast::Reference> localExpr = make_unique<ast::Local>(parsedArg.loc, parsedArg.local);
             if (parsedArg.default_) {
-                localExpr = make_unique<ast::OptionalArg>(parsedArg.loc, move(localExpr), move(parsedArg.default_));
+                localExpr = ast::MK::OptionalArg(parsedArg.loc, move(localExpr), move(parsedArg.default_));
             }
 
             ctx.owner.data(ctx)->arguments()[pos].loc = parsedArg.loc;
@@ -114,7 +114,7 @@ class NameInserter {
 
         if (parsedArg.default_) {
             argInfo.flags.isDefault = true;
-            localExpr = make_unique<ast::OptionalArg>(parsedArg.loc, move(localExpr), move(parsedArg.default_));
+            localExpr = ast::MK::OptionalArg(parsedArg.loc, move(localExpr), move(parsedArg.default_));
         }
 
         if (parsedArg.keyword) {
@@ -742,14 +742,15 @@ public:
             if (auto e = ctx.state.beginError(send->loc, core::errors::Namer::InvalidTypeDefinition)) {
                 e.setHeader("Types must be defined in class or module scopes");
             }
-            return make_unique<ast::EmptyTree>();
+            return ast::MK::EmptyTree();
         }
         if (ctx.owner == core::Symbols::root()) {
             if (auto e = ctx.state.beginError(send->loc, core::errors::Namer::RootTypeMember)) {
                 e.setHeader("`{}` cannot be used at the top-level", "type_member");
             }
-            auto send =
-                ast::MK::Send1(asgn->loc, ast::MK::T(asgn->loc), core::Names::typeAlias(), ast::MK::Untyped(asgn->loc));
+            auto send = ast::MK::Send0Block(asgn->loc, ast::MK::T(asgn->loc), core::Names::typeAlias(),
+                                            ast::MK::Block0(asgn->loc, ast::MK::Untyped(asgn->loc)));
+
             return handleAssignment(ctx, make_unique<ast::Assign>(asgn->loc, std::move(asgn->lhs), std::move(send)));
         }
 

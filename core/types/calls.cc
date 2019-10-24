@@ -437,19 +437,22 @@ optional<core::AutocorrectSuggestion> maybeSuggestExtendTHelpers(core::Context c
     auto [classStart, classEnd] = classLoc->position(ctx);
 
     core::Loc::Detail thisLineStart = {classStart.line, 1};
-    core::Loc thisLineLoc = core::Loc::fromDetails(ctx, classLoc->file(), thisLineStart, thisLineStart);
-    auto [_, thisLinePadding] = thisLineLoc.findStartOfLine(ctx);
+    auto thisLineLoc = core::Loc::fromDetails(ctx, classLoc->file(), thisLineStart, thisLineStart);
+    ENFORCE(thisLineLoc.has_value());
+    auto [_, thisLinePadding] = thisLineLoc.value().findStartOfLine(ctx);
 
-    ENFORCE(classStart.line + 1 <= classLoc->file().data(ctx).lineBreaks().size());
     core::Loc::Detail nextLineStart = {classStart.line + 1, 1};
-    core::Loc nextLineLoc = core::Loc::fromDetails(ctx, classLoc->file(), nextLineStart, nextLineStart);
-    auto [replacementLoc, nextLinePadding] = nextLineLoc.findStartOfLine(ctx);
+    auto nextLineLoc = core::Loc::fromDetails(ctx, classLoc->file(), nextLineStart, nextLineStart);
+    if (!nextLineLoc.has_value()) {
+        return nullopt;
+    }
+    auto [replacementLoc, nextLinePadding] = nextLineLoc.value().findStartOfLine(ctx);
 
     // Preserve the indentation of the line below us.
     string prefix(max(thisLinePadding + 2, nextLinePadding), ' ');
     return core::AutocorrectSuggestion{
         "Add `extend T::Helpers`",
-        {core::AutocorrectSuggestion::Edit{nextLineLoc, fmt::format("{}extend T::Helpers\n", prefix)}}};
+        {core::AutocorrectSuggestion::Edit{nextLineLoc.value(), fmt::format("{}extend T::Helpers\n", prefix)}}};
 }
 
 // This implements Ruby's argument matching logic (assigning values passed to a
@@ -1609,7 +1612,7 @@ public:
         TypePtr finalBlockType =
             Magic_callWithBlock::typeToProc(ctx, args.args[2]->type, args.locs.call, args.locs.args[2]);
         std::optional<int> blockArity = Magic_callWithBlock::getArityForBlock(finalBlockType);
-        auto link = make_shared<core::SendAndBlockLink>(fn, Magic_callWithBlock::argInfoByArity(blockArity));
+        auto link = make_shared<core::SendAndBlockLink>(fn, Magic_callWithBlock::argInfoByArity(blockArity), -1);
         res.main.constr = make_unique<TypeConstraint>();
 
         DispatchArgs innerArgs{fn, sendLocs, sendArgs, receiver->type, receiver->type, link};
@@ -1674,7 +1677,7 @@ public:
         TypePtr finalBlockType =
             Magic_callWithBlock::typeToProc(ctx, args.args[3]->type, args.locs.call, args.locs.args[3]);
         std::optional<int> blockArity = Magic_callWithBlock::getArityForBlock(finalBlockType);
-        auto link = make_shared<core::SendAndBlockLink>(fn, Magic_callWithBlock::argInfoByArity(blockArity));
+        auto link = make_shared<core::SendAndBlockLink>(fn, Magic_callWithBlock::argInfoByArity(blockArity), -1);
         res.main.constr = make_unique<TypeConstraint>();
 
         DispatchArgs innerArgs{fn, sendLocs, sendArgs, receiver->type, receiver->type, link};

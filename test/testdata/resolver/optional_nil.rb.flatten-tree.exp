@@ -20,35 +20,51 @@ begin
 
     <emptyTree>
 
-    def foo<foo>(x, <blk>)
+    def foo(x, <blk>)
       begin
-        T.let(nil, String)
+        if ::T.unsafe(false)
+          T.let(nil, String)
+        else
+          <emptyTree>
+        end
         x
       end
     end
 
-    def bar<bar>(y, <blk>)
+    def bar(y, <blk>)
       begin
-        T.let(nil, String)
+        if ::T.unsafe(false)
+          T.let(nil, String)
+        else
+          <emptyTree>
+        end
         y
       end
     end
 
-    def qux<qux>(z, <blk>)
+    def qux(z, <blk>)
       begin
-        T.let("", String)
+        if ::T.unsafe(false)
+          T.let("", String)
+        else
+          <emptyTree>
+        end
         z
       end
     end
 
-    def baz<baz>(w, <blk>)
+    def baz(w, <blk>)
       begin
-        T.let("", String)
+        if ::T.unsafe(false)
+          T.let("", String)
+        else
+          <emptyTree>
+        end
         w
       end
     end
 
-    def self.<static-init><<static-init>>(<blk>)
+    def self.<static-init>(<blk>)
       begin
         <self>.sig() do ||
           <self>.params({:"x" => ::String}).returns(::String)

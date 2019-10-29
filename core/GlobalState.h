@@ -3,7 +3,6 @@
 #include "absl/synchronization/mutex.h"
 
 #include "core/Error.h"
-#include "core/ErrorQueue.h"
 #include "core/Files.h"
 #include "core/Loc.h"
 #include "core/Names.h"
@@ -90,7 +89,7 @@ public:
     SymbolRef lookupStaticFieldSymbol(SymbolRef owner, NameRef name) {
         return lookupSymbolWithFlags(owner, name, Symbol::Flags::STATIC_FIELD);
     }
-    SymbolRef findRenamedSymbol(SymbolRef owner, SymbolRef name);
+    SymbolRef findRenamedSymbol(SymbolRef owner, SymbolRef name) const;
 
     SymbolRef staticInitForFile(Loc loc);
     SymbolRef staticInitForClass(SymbolRef klass, Loc loc);

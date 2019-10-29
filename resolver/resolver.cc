@@ -3,6 +3,7 @@
 #include "ast/Trees.h"
 #include "ast/ast.h"
 #include "ast/treemap/treemap.h"
+#include "common/sort.h"
 #include "core/Error.h"
 #include "core/Names.h"
 #include "core/StrictLevel.h"
@@ -13,6 +14,7 @@
 
 #include "absl/strings/str_cat.h"
 #include "common/Timer.h"
+#include "common/concurrency/ConcurrentQueue.h"
 #include "core/Symbols.h"
 #include <utility>
 #include <vector>
@@ -464,7 +466,7 @@ private:
         if (!ancestorSym.data(ctx)->isClassOrModuleSealed()) {
             return;
         }
-        Timer timeit(ctx.state.errorQueue->logger, "resolver.registerSealedSubclass");
+        Timer timeit(ctx.state.tracer(), "resolver.registerSealedSubclass");
 
         ancestorSym.data(ctx)->recordSealedSubclass(ctx, job.klass);
     }
@@ -664,7 +666,7 @@ public:
 
     static vector<ast::ParsedFile> resolveConstants(core::MutableContext ctx, vector<ast::ParsedFile> trees,
                                                     WorkerPool &workers) {
-        Timer timeit(ctx.state.errorQueue->logger, "resolver.resolve_constants");
+        Timer timeit(ctx.state.tracer(), "resolver.resolve_constants");
         core::Context ictx = ctx;
         auto resultq = make_shared<BlockingBoundedQueue<ResolveWalkResult>>(trees.size());
         auto fileq = make_shared<ConcurrentBoundedQueue<ast::ParsedFile>>(trees.size());
@@ -731,7 +733,7 @@ public:
         fast_sort(trees,
                   [](const auto &lhs, const auto &rhs) -> bool { return locCompare(lhs.tree->loc, rhs.tree->loc); });
 
-        Timer timeit1(ctx.state.errorQueue->logger, "resolver.resolve_constants.fixed_point");
+        Timer timeit1(ctx.state.tracer(), "resolver.resolve_constants.fixed_point");
 
         bool progress = true;
         bool first = true; // we need to run at least once to force class aliases and type aliases
@@ -740,7 +742,7 @@ public:
             first = false;
             counterInc("resolve.constants.retries");
             {
-                Timer timeit(ctx.state.errorQueue->logger, "resolver.resolve_constants.fixed_point.ancestors");
+                Timer timeit(ctx.state.tracer(), "resolver.resolve_constants.fixed_point.ancestors");
                 // This is an optimization. The order should not matter semantically
                 // We try to resolve most ancestors second because this makes us much more likely to resolve everything
                 // else.
@@ -758,7 +760,7 @@ public:
                 categoryCounterAdd("resolve.constants.ancestor", "retry", origSize - todoAncestors.size());
             }
             {
-                Timer timeit(ctx.state.errorQueue->logger, "resolver.resolve_constants.fixed_point.constants");
+                Timer timeit(ctx.state.tracer(), "resolver.resolve_constants.fixed_point.constants");
                 int origSize = todo.size();
                 auto it = remove_if(todo.begin(), todo.end(),
                                     [ctx](ResolutionItem &job) -> bool { return resolveJob(ctx, job); });
@@ -767,7 +769,7 @@ public:
                 categoryCounterAdd("resolve.constants.nonancestor", "retry", origSize - todo.size());
             }
             {
-                Timer timeit(ctx.state.errorQueue->logger, "resolver.resolve_constants.fixed_point.class_aliases");
+                Timer timeit(ctx.state.tracer(), "resolver.resolve_constants.fixed_point.class_aliases");
                 // This is an optimization. The order should not matter semantically
                 // This is done as a "pre-step" because the first iteration of this effectively ran in TreeMap.
                 // every item in todoClassAliases implicitly depends on an item in item in todo
@@ -782,7 +784,7 @@ public:
                 categoryCounterAdd("resolve.constants.aliases", "retry", origSize - todoClassAliases.size());
             }
             {
-                Timer timeit(ctx.state.errorQueue->logger, "resolver.resolve_constants.fixed_point.type_aliases");
+                Timer timeit(ctx.state.tracer(), "resolver.resolve_constants.fixed_point.type_aliases");
                 int origSize = todoTypeAliases.size();
                 auto it =
                     remove_if(todoTypeAliases.begin(), todoTypeAliases.end(),
@@ -828,7 +830,7 @@ public:
         // Note that this is missing alias stubbing, thus resolveJob needs to be able to handle missing aliases.
 
         {
-            Timer timeit(ctx.state.errorQueue->logger, "resolver.resolve_constants.errors");
+            Timer timeit(ctx.state.tracer(), "resolver.resolve_constants.errors");
             int i = -1;
             for (auto &job : todo) {
                 i++;
@@ -1225,7 +1227,7 @@ public:
 
     static vector<ast::ParsedFile> run(core::MutableContext ctx, vector<ast::ParsedFile> trees) {
         ResolveTypeParamsWalk params;
-        Timer timeit(ctx.state.errorQueue->logger, "resolver.type_params");
+        Timer timeit(ctx.state.tracer(), "resolver.type_params");
 
         for (auto &tree : trees) {
             tree.tree = ast::TreeMap::apply(ctx, params, std::move(tree.tree));
@@ -1433,49 +1435,12 @@ private:
         }
     }
 
-    // In order to check a default argument that looks like
-    //
-    //     sig {params(x: T)}
-    //     def foo(x: <expr>)
-    //       ...
-    //     end
-    //
-    // we elaborate the method definition to
-    //
-    //     def foo(x: <expr>)
-    //       T.let(<expr>, T)
-    //       ...
-    //     end
-    //
-    // which will then get checked later on in the pipeline.
-    void injectOptionalArgs(core::MutableContext ctx, ast::MethodDef *mdef) {
-        ast::InsSeq::STATS_store lets;
-
-        int i = -1;
-        for (auto &argSym : mdef->symbol.data(ctx)->arguments()) {
-            i++;
-            auto &argExp = mdef->args[i];
-            auto argType = argSym.type;
-
-            if (auto *optArgExp = ast::cast_tree<ast::OptionalArg>(argExp.get())) {
-                unique_ptr<ast::Expression> default_;
-                auto loc = optArgExp->expr->loc;
-                if (!argType) {
-                    default_ = ast::MK::KeepForIDE(move(optArgExp->default_));
-                } else {
-                    // Using optArgExp's loc will make errors point to the arg list, even though the T.let is in the
-                    // body.
-                    default_ = make_unique<ast::Cast>(loc, argType, move(optArgExp->default_), core::Names::let());
-                }
-                auto maybe =
-                    ast::MK::If(loc, ast::MK::Unsafe(loc, ast::MK::False(loc)), move(default_), ast::MK::EmptyTree());
-                lets.emplace_back(std::move(maybe));
+    // These will already be haldned by DefaultArgs DSL pass
+    void deleteOptionlArg(core::MutableContext ctx, ast::MethodDef *mdef) {
+        for (auto &arg : mdef->args) {
+            if (auto *optArgExp = ast::cast_tree<ast::OptionalArg>(arg.get())) {
+                optArgExp->default_ = nullptr;
             }
-        }
-
-        if (!lets.empty() && !mdef->symbol.data(ctx)->isAbstract()) {
-            auto loc = mdef->rhs->loc;
-            mdef->rhs = ast::MK::InsSeq(loc, std::move(lets), std::move(mdef->rhs));
         }
     }
 
@@ -1649,7 +1614,7 @@ private:
                     lastSigs.clear();
                 }
 
-                injectOptionalArgs(ctx, mdef);
+                deleteOptionlArg(ctx, mdef);
 
                 if (mdef->symbol.data(ctx)->isAbstract()) {
                     if (!ast::isa_tree<ast::EmptyTree>(mdef->rhs.get())) {
@@ -2137,7 +2102,7 @@ ast::ParsedFilesOrCancelled Resolver::run(core::MutableContext ctx, vector<ast::
 
 vector<ast::ParsedFile> Resolver::resolveSigs(core::MutableContext ctx, vector<ast::ParsedFile> trees) {
     ResolveSignaturesWalk sigs;
-    Timer timeit(ctx.state.errorQueue->logger, "resolver.sigs_vars_and_flatten");
+    Timer timeit(ctx.state.tracer(), "resolver.sigs_vars_and_flatten");
     for (auto &tree : trees) {
         tree.tree = ast::TreeMap::apply(ctx, sigs, std::move(tree.tree));
     }
@@ -2147,7 +2112,7 @@ vector<ast::ParsedFile> Resolver::resolveSigs(core::MutableContext ctx, vector<a
 
 vector<ast::ParsedFile> Resolver::resolveMixesInClassMethods(core::MutableContext ctx, vector<ast::ParsedFile> trees) {
     ResolveMixesInClassMethodsWalk mixesInClassMethods;
-    Timer timeit(ctx.state.errorQueue->logger, "resolver.mixes_in_class_methods");
+    Timer timeit(ctx.state.tracer(), "resolver.mixes_in_class_methods");
     for (auto &tree : trees) {
         tree.tree = ast::TreeMap::apply(ctx, mixesInClassMethods, std::move(tree.tree));
     }
@@ -2156,7 +2121,7 @@ vector<ast::ParsedFile> Resolver::resolveMixesInClassMethods(core::MutableContex
 
 void Resolver::sanityCheck(core::MutableContext ctx, vector<ast::ParsedFile> &trees) {
     if (debug_mode) {
-        Timer timeit(ctx.state.errorQueue->logger, "resolver.sanity_check");
+        Timer timeit(ctx.state.tracer(), "resolver.sanity_check");
         ResolveSanityCheckWalk sanity;
         for (auto &tree : trees) {
             tree.tree = ast::TreeMap::apply(ctx, sanity, std::move(tree.tree));

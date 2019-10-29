@@ -13,6 +13,7 @@
 
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_split.h"
+#include "core/ErrorQueue.h"
 #include "core/errors/infer.h"
 #include "main/pipeline/semantic_extension/SemanticExtension.h"
 
@@ -642,7 +643,7 @@ SymbolRef GlobalState::lookupSymbolWithFlags(SymbolRef owner, NameRef name, u4 f
     return Symbols::noSymbol();
 }
 
-SymbolRef GlobalState::findRenamedSymbol(SymbolRef owner, SymbolRef sym) {
+SymbolRef GlobalState::findRenamedSymbol(SymbolRef owner, SymbolRef sym) const {
     // This method works by knowing how to replicate the logic of renaming in order to find whatever
     // the previous name was: for `x$n` where `n` is larger than 2, it'll be `x$(n-1)`, for bare `x`,
     // it'll be whatever the largest `x$n` that exists is, if any; otherwise, there will be none.
@@ -652,13 +653,21 @@ SymbolRef GlobalState::findRenamedSymbol(SymbolRef owner, SymbolRef sym) {
     SymbolData ownerScope = owner.dataAllowingNone(*this);
 
     if (nameData->kind == NameKind::UNIQUE) {
+        if (nameData->unique.uniqueNameKind != UniqueNameKind::MangleRename) {
+            return Symbols::noSymbol();
+        }
         if (nameData->unique.num == 1) {
             return Symbols::noSymbol();
         } else {
             ENFORCE(nameData->unique.num > 1);
             auto nm =
                 lookupNameUnique(UniqueNameKind::MangleRename, nameData->unique.original, nameData->unique.num - 1);
-            return nm.exists() ? ownerScope->members()[nm] : Symbols::noSymbol();
+            if (!nm.exists()) {
+                return Symbols::noSymbol();
+            }
+            auto res = ownerScope->members()[nm];
+            ENFORCE(res.exists());
+            return res;
         }
     } else {
         u2 unique = 1;

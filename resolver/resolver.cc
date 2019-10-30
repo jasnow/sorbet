@@ -1133,7 +1133,7 @@ public:
 
     unique_ptr<ast::ConstantLit> postTransformConstantLit(core::MutableContext ctx, unique_ptr<ast::ConstantLit> lit) {
         if (trackDependencies_) {
-            core::SymbolRef symbol = lit->symbol;
+            core::SymbolRef symbol = lit->symbol.data(ctx)->dealias(ctx);
             if (symbol == core::Symbols::T()) {
                 return lit;
             }
@@ -1435,12 +1435,49 @@ private:
         }
     }
 
-    // These will already be haldned by DefaultArgs DSL pass
-    void deleteOptionlArg(core::MutableContext ctx, ast::MethodDef *mdef) {
-        for (auto &arg : mdef->args) {
-            if (auto *optArgExp = ast::cast_tree<ast::OptionalArg>(arg.get())) {
-                optArgExp->default_ = nullptr;
+    // In order to check a default argument that looks like
+    //
+    //     sig {params(x: T)}
+    //     def foo(x: <expr>)
+    //       ...
+    //     end
+    //
+    // we elaborate the method definition to
+    //
+    //     def foo(x: <expr>)
+    //       T.let(<expr>, T)
+    //       ...
+    //     end
+    //
+    // which will then get checked later on in the pipeline.
+    void injectOptionalArgs(core::MutableContext ctx, ast::MethodDef *mdef) {
+        ast::InsSeq::STATS_store lets;
+
+        int i = -1;
+        for (auto &argSym : mdef->symbol.data(ctx)->arguments()) {
+            i++;
+            auto &argExp = mdef->args[i];
+            auto argType = argSym.type;
+
+            if (auto *optArgExp = ast::cast_tree<ast::OptionalArg>(argExp.get())) {
+                unique_ptr<ast::Expression> default_;
+                auto loc = optArgExp->expr->loc;
+                if (!argType) {
+                    default_ = ast::MK::KeepForIDE(move(optArgExp->default_));
+                } else {
+                    // Using optArgExp's loc will make errors point to the arg list, even though the T.let is in the
+                    // body.
+                    default_ = make_unique<ast::Cast>(loc, argType, move(optArgExp->default_), core::Names::let());
+                }
+                auto maybe =
+                    ast::MK::If(loc, ast::MK::Unsafe(loc, ast::MK::False(loc)), move(default_), ast::MK::EmptyTree());
+                lets.emplace_back(std::move(maybe));
             }
+        }
+
+        if (!lets.empty() && !mdef->symbol.data(ctx)->isAbstract()) {
+            auto loc = mdef->rhs->loc;
+            mdef->rhs = ast::MK::InsSeq(loc, std::move(lets), std::move(mdef->rhs));
         }
     }
 
@@ -1554,8 +1591,9 @@ private:
                     if (loc.file().data(ctx).originalSigil == core::StrictLevel::None &&
                         !lastSigs.front()->isDSLSynthesized()) {
                         if (auto e = ctx.state.beginError(loc, core::errors::Resolver::SigInFileWithoutSigil)) {
-                            e.setHeader("To use `sig`, this file must declare an explicit `# typed:` sigil (found: "
-                                        "none). If you're not sure which one to use, start with `# typed: false`");
+                            e.setHeader("To use `{}`, this file must declare an explicit `{}` sigil (found: "
+                                        "none). If you're not sure which one to use, start with `{}`",
+                                        "sig", "# typed:", "# typed: false");
                         }
                     }
 
@@ -1614,7 +1652,7 @@ private:
                     lastSigs.clear();
                 }
 
-                deleteOptionlArg(ctx, mdef);
+                injectOptionalArgs(ctx, mdef);
 
                 if (mdef->symbol.data(ctx)->isAbstract()) {
                     if (!ast::isa_tree<ast::EmptyTree>(mdef->rhs.get())) {

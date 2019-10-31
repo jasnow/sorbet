@@ -299,7 +299,7 @@ void GlobalState::initEmpty() {
     Symbols::root().dataAllowingNone(*this)->members()[core::Names::Constants::Bottom()] = Symbols::bottom();
     Context ctx(*this, Symbols::root());
 
-    // Synthesize <Magic>#build_hash(*vs : T.untyped) => Hash
+    // Synthesize <Magic>#<build-hash>(*vs : T.untyped) => Hash
     SymbolRef method = enterMethodSymbol(Loc::none(), Symbols::MagicSingleton(), Names::buildHash());
     {
         auto &arg = enterMethodArgumentSymbol(Loc::none(), method, Names::arg0());
@@ -311,7 +311,7 @@ void GlobalState::initEmpty() {
         auto &arg = enterMethodArgumentSymbol(Loc::none(), method, Names::blkArg());
         arg.flags.isBlock = true;
     }
-    // Synthesize <Magic>#build_array(*vs : T.untyped) => Array
+    // Synthesize <Magic>#<build-array>(*vs : T.untyped) => Array
     method = enterMethodSymbol(Loc::none(), Symbols::MagicSingleton(), Names::buildArray());
     {
         auto &arg = enterMethodArgumentSymbol(Loc::none(), method, Names::arg0());
@@ -871,6 +871,32 @@ string_view GlobalState::enterString(string_view nm) {
     memcpy(from, nm.data(), nm.size());
     stringsLastPageUsed += nm.size();
     return string_view(from, nm.size());
+}
+
+NameRef GlobalState::lookupNameUTF8(string_view nm) const {
+    const auto hs = _hash(nm);
+    unsigned int hashTableSize = namesByHash.size();
+    unsigned int mask = hashTableSize - 1;
+    auto bucketId = hs & mask;
+    unsigned int probeCount = 1;
+
+    while (namesByHash[bucketId].second != 0u) {
+        auto &bucket = namesByHash[bucketId];
+        if (bucket.first == hs) {
+            auto nameId = bucket.second;
+            auto &nm2 = names[nameId];
+            if (nm2.kind == NameKind::UTF8 && nm2.raw.utf8 == nm) {
+                counterInc("names.utf8.hit");
+                return nm2.ref(*this);
+            } else {
+                counterInc("names.hash_collision.utf8");
+            }
+        }
+        bucketId = (bucketId + probeCount) & mask;
+        probeCount++;
+    }
+
+    return core::NameRef::noName();
 }
 
 NameRef GlobalState::enterNameUTF8(string_view nm) {

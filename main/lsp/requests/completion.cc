@@ -216,7 +216,8 @@ vector<core::LocalVariable> allSimilarLocals(const core::GlobalState &gs, const 
     return result;
 }
 
-string methodSnippet(const core::GlobalState &gs, core::SymbolRef method) {
+string methodSnippet(const core::GlobalState &gs, core::SymbolRef method, core::TypePtr receiverType,
+                     const core::TypeConstraint *constraint) {
     auto shortName = method.data(gs)->name.data(gs)->shortName(gs);
     vector<string> typeAndArgNames;
 
@@ -234,7 +235,8 @@ string methodSnippet(const core::GlobalState &gs, core::SymbolRef method) {
                 absl::StrAppend(&s, argSym.name.data(gs)->shortName(gs), ": ");
             }
             if (argSym.type) {
-                absl::StrAppend(&s, "${", i++, ":", argSym.type->show(gs), "}");
+                absl::StrAppend(&s, "${", i++, ":",
+                                getResultType(gs, argSym.type, method, receiverType, constraint)->show(gs), "}");
             } else {
                 absl::StrAppend(&s, "${", i++, "}");
             }
@@ -353,7 +355,7 @@ unique_ptr<CompletionItem> LSPLoop::getCompletionItemForSymbol(const core::Globa
         string replacementText;
         if (config->getClientConfig().clientCompletionItemSnippetSupport) {
             item->insertTextFormat = InsertTextFormat::Snippet;
-            replacementText = methodSnippet(gs, what);
+            replacementText = methodSnippet(gs, what, receiverType, constraint);
         } else {
             item->insertTextFormat = InsertTextFormat::PlainText;
             replacementText = string(what.data(gs)->name.data(gs)->shortName(gs));
@@ -412,13 +414,6 @@ void LSPLoop::findSimilarConstantOrIdent(const core::GlobalState &gs, const core
 unique_ptr<ResponseMessage> LSPLoop::handleTextDocumentCompletion(LSPTypechecker &typechecker, const MessageId &id,
                                                                   const CompletionParams &params) const {
     auto response = make_unique<ResponseMessage>("2.0", id, LSPMethod::TextDocumentCompletion);
-    if (!config->opts.lspAutocompleteEnabled && !config->opts.lspAutocompleteMethodsEnabled) {
-        response->error =
-            make_unique<ResponseError>((int)LSPErrorCodes::InvalidRequest,
-                                       "The `Autocomplete` LSP feature is experimental and disabled by default.");
-        return response;
-    }
-
     auto emptyResult = make_unique<CompletionList>(false, vector<unique_ptr<CompletionItem>>{});
 
     prodCategoryCounterInc("lsp.messages.processed", "textDocument.completion");

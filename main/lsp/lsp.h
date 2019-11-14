@@ -83,8 +83,6 @@ class LSPLoop {
     std::vector<std::unique_ptr<DocumentHighlight>>
     getHighlightsToSymbolInFile(LSPTypechecker &typechecker, std::string_view uri, core::SymbolRef symbol,
                                 std::vector<std::unique_ptr<DocumentHighlight>> highlights = {}) const;
-    std::vector<core::LocalVariable> localsForMethod(const core::GlobalState &gs, LSPTypechecker &typechecker,
-                                                     const core::SymbolRef method) const;
     std::unique_ptr<ResponseMessage> handleTextDocumentReferences(LSPTypechecker &typechecker, const MessageId &id,
                                                                   const ReferenceParams &params) const;
     std::unique_ptr<ResponseMessage> handleTextDocumentDefinition(LSPTypechecker &typechecker, const MessageId &id,
@@ -95,7 +93,7 @@ class LSPLoop {
                                                                   const CompletionParams &params) const;
     std::unique_ptr<ResponseMessage> handleTextDocumentCodeAction(LSPTypechecker &typechecker, const MessageId &id,
                                                                   const CodeActionParams &params) const;
-    std::unique_ptr<CompletionItem> getCompletionItemForSymbol(const core::GlobalState &gs, core::SymbolRef what,
+    std::unique_ptr<CompletionItem> getCompletionItemForMethod(const core::GlobalState &gs, core::SymbolRef what,
                                                                core::TypePtr receiverType,
                                                                const core::TypeConstraint *constraint,
                                                                const core::Loc queryLoc, std::string_view prefix,

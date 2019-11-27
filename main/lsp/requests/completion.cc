@@ -251,37 +251,61 @@ vector<core::LocalVariable> allSimilarLocals(const core::GlobalState &gs, const 
 
 string methodSnippet(const core::GlobalState &gs, core::SymbolRef method, core::TypePtr receiverType,
                      const core::TypeConstraint *constraint) {
-    auto shortName = method.data(gs)->name.data(gs)->shortName(gs);
+    fmt::memory_buffer result;
+    fmt::format_to(result, "{}", method.data(gs)->name.data(gs)->shortName(gs));
+    auto nextTabstop = 1;
+
     vector<string> typeAndArgNames;
-
-    int i = 1;
-    if (method.data(gs)->isMethod()) {
-        for (auto &argSym : method.data(gs)->arguments()) {
-            string s;
-            if (argSym.flags.isBlock) {
-                continue;
-            }
-            if (argSym.flags.isDefault) {
-                continue;
-            }
-            if (argSym.flags.isKeyword) {
-                absl::StrAppend(&s, argSym.name.data(gs)->shortName(gs), ": ");
-            }
-            if (argSym.type) {
-                absl::StrAppend(&s, "${", i++, ":",
-                                getResultType(gs, argSym.type, method, receiverType, constraint)->show(gs), "}");
-            } else {
-                absl::StrAppend(&s, "${", i++, "}");
-            }
-            typeAndArgNames.emplace_back(s);
+    for (auto &argSym : method.data(gs)->arguments()) {
+        fmt::memory_buffer argBuf;
+        if (argSym.flags.isBlock) {
+            // Blocks are handled below
+            continue;
         }
+        if (argSym.flags.isDefault) {
+            continue;
+        }
+        if (argSym.flags.isKeyword) {
+            fmt::format_to(argBuf, "{}: ", argSym.name.data(gs)->shortName(gs));
+        }
+        if (argSym.type) {
+            auto resultType = getResultType(gs, argSym.type, method, receiverType, constraint)->show(gs);
+            fmt::format_to(argBuf, "${{{}:{}}}", nextTabstop++, resultType);
+        } else {
+            fmt::format_to(argBuf, "${{{}}}", nextTabstop++);
+        }
+        typeAndArgNames.emplace_back(to_string(argBuf));
     }
 
-    if (typeAndArgNames.empty()) {
-        return fmt::format("{}{}", shortName, "${0}");
-    } else {
-        return fmt::format("{}({}){}", shortName, fmt::join(typeAndArgNames, ", "), "${0}");
+    if (!typeAndArgNames.empty()) {
+        fmt::format_to(result, "({})", fmt::join(typeAndArgNames, ", "));
     }
+
+    ENFORCE(!method.data(gs)->arguments().empty());
+    auto &blkArg = method.data(gs)->arguments().back();
+    ENFORCE(blkArg.flags.isBlock);
+
+    auto ctx = core::Context{gs, core::Symbols::root()};
+    auto hasBlockType = blkArg.type != nullptr && !blkArg.type->isUntyped();
+    if (hasBlockType && !core::Types::isSubType(ctx, core::Types::nilClass(), blkArg.type)) {
+        string blkArgs;
+        if (auto *appliedType = core::cast_type<core::AppliedType>(blkArg.type.get())) {
+            if (appliedType->targs.size() >= 2) {
+                // The first element in targs is the return type.
+                auto targs_it = appliedType->targs.begin();
+                targs_it++;
+                blkArgs = fmt::format(" |{}|", fmt::map_join(targs_it, appliedType->targs.end(), ", ", [&](auto targ) {
+                                          auto resultType = getResultType(gs, targ, method, receiverType, constraint);
+                                          return fmt::format("${{{}:{}}}", nextTabstop++, resultType->show(gs));
+                                      }));
+            }
+        }
+
+        fmt::format_to(result, " do{}\n  ${{{}}}\nend", blkArgs, nextTabstop++);
+    }
+
+    fmt::format_to(result, "${{0}}");
+    return to_string(result);
 }
 
 // This is an approximation. It takes advantage of the fact that nearly all of the time,

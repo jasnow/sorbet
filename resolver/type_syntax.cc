@@ -339,9 +339,6 @@ ParsedSig TypeSyntax::parseSig(core::MutableContext ctx, ast::Send *sigSend, con
                     break;
                 case core::Names::on_failure()._id:
                     break;
-                case core::Names::generated()._id:
-                    sig.seen.generated = true;
-                    break;
                 case core::Names::final_()._id:
                     if (auto e = ctx.state.beginError(send->loc, core::errors::Resolver::InvalidMethodSignature)) {
                         reportedInvalidMethod = true;

@@ -1426,7 +1426,7 @@ private:
             }
         }
 
-        NameRef to_proc = core::Names::to_proc();
+        NameRef to_proc = core::Names::toProc();
         InlinedVector<const TypeAndOrigins *, 2> sendArgs;
         InlinedVector<Loc, 2> sendArgLocs;
         CallLocs sendLocs{callLoc, receiverLoc, sendArgLocs};
@@ -1704,6 +1704,68 @@ public:
         res.returnType = move(ty);
     }
 } Magic_suggestUntypedConstantType;
+
+/**
+ * This is a special version of `new` that will return `T.attached_class`
+ * instead.
+ */
+class Magic_selfNew : public IntrinsicMethod {
+public:
+    void apply(Context ctx, DispatchArgs args, const Type *thisType, DispatchResult &res) const override {
+        // args[0] is the Class to create an instance of
+        // args[1..] are the arguments to the constructor
+
+        if (args.args.empty()) {
+            res.returnType = core::Types::untypedUntracked();
+            return;
+        }
+
+        auto selfTy = args.args[0]->type;
+        SymbolRef self = unwrapSymbol(selfTy.get());
+
+        InlinedVector<const TypeAndOrigins *, 2> sendArgStore;
+        InlinedVector<Loc, 2> sendArgLocs;
+        for (int i = 1; i < args.args.size(); ++i) {
+            sendArgStore.emplace_back(args.args[i]);
+            sendArgLocs.emplace_back(args.locs.args[i]);
+        }
+        CallLocs sendLocs{args.locs.call, args.locs.args[0], sendArgLocs};
+
+        TypePtr returnTy;
+        DispatchResult dispatched;
+        if (!self.data(ctx)->isSingletonClass(ctx)) {
+            // In the case that `self` is not a singleton class, we know that
+            // this was a call to `new` outside of a self context. Dispatch to
+            // an instance method named new, and see what happens.
+            DispatchArgs innerArgs{Names::new_(), sendLocs, sendArgStore, selfTy, selfTy, args.block};
+            dispatched = selfTy->dispatchCall(ctx, innerArgs);
+            returnTy = dispatched.returnType;
+        } else {
+            // Otherwise, we know that this is the proper new intrinsic, and we
+            // should be returning something of type `T.attached_class`
+            auto attachedClass = self.data(ctx)->findMember(ctx, core::Names::Constants::AttachedClass());
+
+            // AttachedClass will only be missing on `T.untyped`
+            ENFORCE(attachedClass.exists());
+
+            auto instanceTy = self.data(ctx)->attachedClass(ctx).data(ctx)->externalType(ctx);
+            DispatchArgs innerArgs{Names::initialize(), sendLocs, sendArgStore, instanceTy, instanceTy, args.block};
+            dispatched = instanceTy->dispatchCall(ctx, innerArgs);
+
+            // The return type from dispatched is ignored, and we return
+            // `T.attached_class` instead.
+            returnTy = make_type<SelfTypeParam>(attachedClass);
+        }
+
+        for (auto &err : res.main.errors) {
+            dispatched.main.errors.emplace_back(std::move(err));
+        }
+        res.main.errors.clear();
+        res.main = move(dispatched.main);
+        res.returnType = returnTy;
+        res.main.sendTp = returnTy;
+    }
+} Magic_selfNew;
 
 class DeclBuilderForProcs_void : public IntrinsicMethod {
 public:
@@ -2027,7 +2089,7 @@ public:
     }
 } Kernel_proc;
 
-class enumerable_to_h : public IntrinsicMethod {
+class Enumerable_toH : public IntrinsicMethod {
 public:
     // Forward Enumerable.to_h to RubyType.enumerable_to_h[self]
     void apply(Context ctx, DispatchArgs args, const Type *thisType, DispatchResult &res) const override {
@@ -2042,7 +2104,7 @@ public:
         InlinedVector<const TypeAndOrigins *, 2> innerArgs{&myType};
 
         DispatchArgs dispatch{
-            core::Names::enumerable_to_h(), locs, innerArgs, hash, hash, nullptr,
+            core::Names::enumerableToH(), locs, innerArgs, hash, hash, nullptr,
         };
         auto dispatched = hash->dispatchCall(ctx, dispatch);
         for (auto &err : dispatched.main.errors) {
@@ -2051,7 +2113,7 @@ public:
         dispatched.main.errors.clear();
         res.returnType = move(dispatched.returnType);
     }
-} enumerable_to_h;
+} Enumerable_toH;
 
 // statically determine things like `Integer === 3` to be true
 class Module_tripleEq : public IntrinsicMethod {
@@ -2118,6 +2180,7 @@ const vector<Intrinsic> intrinsicMethods{
     {Symbols::Magic(), Intrinsic::Kind::Singleton, Names::callWithBlock(), &Magic_callWithBlock},
     {Symbols::Magic(), Intrinsic::Kind::Singleton, Names::callWithSplatAndBlock(), &Magic_callWithSplatAndBlock},
     {Symbols::Magic(), Intrinsic::Kind::Singleton, Names::suggestType(), &Magic_suggestUntypedConstantType},
+    {Symbols::Magic(), Intrinsic::Kind::Singleton, Names::selfNew(), &Magic_selfNew},
 
     {Symbols::DeclBuilderForProcsSingleton(), Intrinsic::Kind::Instance, Names::void_(), &DeclBuilderForProcs_void},
     {Symbols::DeclBuilderForProcsSingleton(), Intrinsic::Kind::Instance, Names::returns(),
@@ -2130,7 +2193,7 @@ const vector<Intrinsic> intrinsicMethods{
     {Symbols::Tuple(), Intrinsic::Kind::Instance, Names::last(), &Tuple_last},
     {Symbols::Tuple(), Intrinsic::Kind::Instance, Names::min(), &Tuple_minMax},
     {Symbols::Tuple(), Intrinsic::Kind::Instance, Names::max(), &Tuple_minMax},
-    {Symbols::Tuple(), Intrinsic::Kind::Instance, Names::to_a(), &Tuple_to_a},
+    {Symbols::Tuple(), Intrinsic::Kind::Instance, Names::toA(), &Tuple_to_a},
     {Symbols::Tuple(), Intrinsic::Kind::Instance, Names::concat(), &Tuple_concat},
 
     {Symbols::Shape(), Intrinsic::Kind::Instance, Names::merge(), &Shape_merge},
@@ -2142,7 +2205,7 @@ const vector<Intrinsic> intrinsicMethods{
     {Symbols::Kernel(), Intrinsic::Kind::Instance, Names::proc(), &Kernel_proc},
     {Symbols::Kernel(), Intrinsic::Kind::Instance, Names::lambda(), &Kernel_proc},
 
-    {Symbols::Enumerable(), Intrinsic::Kind::Instance, Names::to_h(), &enumerable_to_h},
+    {Symbols::Enumerable(), Intrinsic::Kind::Instance, Names::toH(), &Enumerable_toH},
 
     {Symbols::Module(), Intrinsic::Kind::Instance, Names::tripleEq(), &Module_tripleEq},
 };

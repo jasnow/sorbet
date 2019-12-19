@@ -267,10 +267,6 @@ void GlobalState::initEmpty() {
     ENFORCE(id == Symbols::Net_Protocol());
     Symbols::Net_Protocol().data(*this)->setIsModule(false);
 
-    // A magic symbol to cause CFGs to be exported
-    id = enterClassSymbol(Loc::none(), Symbols::T(), core::Names::Constants::CFGExport());
-    ENFORCE(id == Symbols::T_CFGExport());
-
     id = enterClassSymbol(Loc::none(), Symbols::T_Sig(), core::Names::Constants::WithoutRuntime());
     ENFORCE(id == Symbols::T_Sig_WithoutRuntime());
 
@@ -421,6 +417,18 @@ void GlobalState::initEmpty() {
     {
         auto &arg = enterMethodArgumentSymbol(Loc::none(), method, Names::arg0());
         arg.type = Types::untyped(*this, method);
+    }
+    method.data(*this)->resultType = Types::untyped(*this, method);
+    {
+        auto &arg = enterMethodArgumentSymbol(Loc::none(), method, Names::blkArg());
+        arg.flags.isBlock = true;
+    }
+    // Synthesize <Magic>#<self-new>(arg: *T.untyped) => T.untyped
+    method = enterMethodSymbol(Loc::none(), Symbols::MagicSingleton(), Names::selfNew());
+    {
+        auto &arg = enterMethodArgumentSymbol(Loc::none(), method, Names::arg0());
+        arg.type = Types::untyped(*this, method);
+        arg.flags.isRepeated = true;
     }
     method.data(*this)->resultType = Types::untyped(*this, method);
     {
@@ -1528,6 +1536,8 @@ bool GlobalState::tryCommitEpoch(u4 epoch, bool isCancelable, function<void()> t
     // Typechecking does not run under the mutex, as it would prevent another thread from running `tryCancelSlowPath`
     // during typechecking.
     typecheck();
+
+    bool committed = false;
     {
         absl::MutexLock lock(epochMutex.get());
         // Try to commit.
@@ -1537,14 +1547,15 @@ bool GlobalState::tryCommitEpoch(u4 epoch, bool isCancelable, function<void()> t
             ENFORCE(lastCommittedLSPEpoch->load() != processing, "Trying to commit an already-committed epoch.");
             // OK to commit!
             lastCommittedLSPEpoch->store(processing);
-            return true;
+            committed = true;
+        } else {
+            // Typechecking was canceled.
+            const u4 lastCommitted = lastCommittedLSPEpoch->load();
+            currentlyProcessingLSPEpoch->store(lastCommitted);
+            lspEpochInvalidator->store(lastCommitted);
         }
-        // Typechecking was canceled.
-        const u4 lastCommitted = lastCommittedLSPEpoch->load();
-        currentlyProcessingLSPEpoch->store(lastCommitted);
-        lspEpochInvalidator->store(lastCommitted);
     }
-    return false;
+    return committed;
 }
 
 void GlobalState::trace(string_view msg) const {

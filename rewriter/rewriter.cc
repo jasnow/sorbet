@@ -3,28 +3,30 @@
 #include "ast/verifier/verifier.h"
 #include "common/typecase.h"
 #include "main/pipeline/semantic_extension/SemanticExtension.h"
+#include "rewriter/AttrReader.h"
 #include "rewriter/ClassNew.h"
+#include "rewriter/Cleanup.h"
 #include "rewriter/Command.h"
 #include "rewriter/DSLBuilder.h"
 #include "rewriter/DefaultArgs.h"
 #include "rewriter/Delegate.h"
 #include "rewriter/Flatfiles.h"
+#include "rewriter/Flatten.h"
+#include "rewriter/Initializer.h"
 #include "rewriter/InterfaceWrapper.h"
 #include "rewriter/Mattr.h"
 #include "rewriter/Minitest.h"
 #include "rewriter/MixinEncryptedProp.h"
+#include "rewriter/ModuleFunction.h"
 #include "rewriter/Private.h"
 #include "rewriter/Prop.h"
 #include "rewriter/ProtobufDescriptorPool.h"
 #include "rewriter/Rails.h"
 #include "rewriter/Regexp.h"
+#include "rewriter/SelfNew.h"
 #include "rewriter/Struct.h"
 #include "rewriter/TEnum.h"
 #include "rewriter/TypeMembers.h"
-#include "rewriter/attr_reader.h"
-#include "rewriter/cleanup.h"
-#include "rewriter/flatten.h"
-#include "rewriter/module_function.h"
 
 using namespace std;
 
@@ -128,6 +130,8 @@ public:
                     }
                 },
 
+                [&](ast::MethodDef *mdef) { Initializer::run(ctx, mdef, prevStat); },
+
                 [&](ast::Expression *e) {});
 
             prevStat = stat.get();
@@ -155,8 +159,18 @@ public:
         return classDef;
     }
 
+    // NOTE: this case differs from the `Send` typecase branch in `postTransformClassDef` above, as it will apply to all
+    // sends, not just those that are present in the RHS of a `ClassDef`.
     unique_ptr<ast::Expression> postTransformSend(core::MutableContext ctx, unique_ptr<ast::Send> send) {
-        return InterfaceWrapper::run(ctx, std::move(send));
+        if (auto expr = InterfaceWrapper::run(ctx, send.get())) {
+            return expr;
+        }
+
+        if (auto expr = SelfNew::run(ctx, send.get())) {
+            return expr;
+        }
+
+        return send;
     }
 
 private:

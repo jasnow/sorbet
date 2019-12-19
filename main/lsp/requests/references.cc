@@ -41,16 +41,19 @@ unique_ptr<ResponseMessage> LSPLoop::handleTextDocumentReferences(LSPTypechecker
             // If file is untyped, only supports find reference requests from constants and class definitions.
             if (auto constResp = resp->isConstant()) {
                 response->result = getReferencesToSymbol(typechecker, constResp->symbol);
+            } else if (auto fieldResp = resp->isField()) {
+                response->result = getReferencesToSymbol(typechecker, fieldResp->symbol);
             } else if (auto defResp = resp->isDefinition()) {
                 if (fileIsTyped || defResp->symbol.data(gs)->isClassOrModule()) {
                     response->result = getReferencesToSymbol(typechecker, defResp->symbol);
                 }
             } else if (fileIsTyped && resp->isIdent()) {
                 auto identResp = resp->isIdent();
-                auto loc = identResp->owner.data(gs)->loc();
+                auto loc = identResp->termLoc;
                 if (loc.exists()) {
                     auto run2 = typechecker.query(
-                        core::lsp::Query::createVarQuery(identResp->owner, identResp->variable), {loc.file()});
+                        core::lsp::Query::createVarQuery(identResp->enclosingMethod, identResp->variable),
+                        {loc.file()});
                     response->result = extractLocations(gs, run2.responses);
                 }
             } else if (fileIsTyped && resp->isSend()) {

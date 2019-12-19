@@ -2,7 +2,6 @@
 // minimal build to speedup compilation. Remove extra features
 #else
 // has to go first, as it violates poisons
-#include "cfg/proto/proto.h"
 #include "core/proto/proto.h"
 #include "namer/configatron/configatron.h"
 #include "plugin/Plugins.h"
@@ -72,19 +71,6 @@ public:
         if (print.CFGRaw.enabled) {
             print.CFGRaw.fmt("{}\n\n", cfg->showRaw(ctx));
         }
-#ifndef SORBET_REALMAIN_MIN
-        if ((print.CFGJson.enabled || print.CFGProto.enabled) && cfg->shouldExport(ctx.state)) {
-            auto proto = cfg::Proto::toProto(ctx.state, *cfg);
-            if (print.CFGJson.enabled) {
-                string buf = core::Proto::toJSON(proto);
-                print.CFGJson.print(buf);
-            } else {
-                // The proto wire format allows simply concatenating repeated message fields
-                string buf = cfg::Proto::toMulti(proto).SerializeAsString();
-                print.CFGProto.print(buf);
-            }
-        }
-#endif
         return m;
     }
 };
@@ -367,27 +353,29 @@ core::StrictLevel decideStrictLevel(const core::GlobalState &gs, const core::Fil
     if (!absl::StartsWith(filePath, "/") && !absl::StartsWith(filePath, "./")) {
         filePath.insert(0, "./");
     }
-    auto fnd = opts.strictnessOverrides.find(filePath);
-    if (fnd != opts.strictnessOverrides.end()) {
-        if (fnd->second == fileData.originalSigil) {
-            core::ErrorRegion errs(gs, file);
-            if (auto e = gs.beginError(sorbet::core::Loc::none(file), core::errors::Parser::ParserError)) {
-                e.setHeader("Useless override of strictness level");
-            }
-        }
-        level = fnd->second;
+
+    if (fileData.originalSigil == core::StrictLevel::None) {
+        level = core::StrictLevel::False;
     } else {
-        if (fileData.originalSigil == core::StrictLevel::None) {
-            level = core::StrictLevel::False;
-        } else {
-            level = fileData.originalSigil;
-        }
+        level = fileData.originalSigil;
     }
 
     core::StrictLevel minStrict = opts.forceMinStrict;
     core::StrictLevel maxStrict = opts.forceMaxStrict;
     if (level <= core::StrictLevel::Max && level > core::StrictLevel::Ignore) {
         level = max(min(level, maxStrict), minStrict);
+    }
+
+    auto fnd = opts.strictnessOverrides.find(filePath);
+    if (fnd != opts.strictnessOverrides.end()) {
+        if (fnd->second == fileData.originalSigil && fnd->second > opts.forceMinStrict &&
+            fnd->second < opts.forceMaxStrict) {
+            core::ErrorRegion errs(gs, file);
+            if (auto e = gs.beginError(sorbet::core::Loc::none(file), core::errors::Parser::ParserError)) {
+                e.setHeader("Useless override of strictness level");
+            }
+        }
+        level = fnd->second;
     }
 
     if (gs.runningUnderAutogen) {
@@ -958,17 +946,19 @@ ast::ParsedFilesOrCancelled typecheck(unique_ptr<core::GlobalState> &gs, vector<
                 int processedByThread = 0;
 
                 {
-                    for (auto result = fileq->try_pop(job); !result.done() && !ctx.state.wasTypecheckingCanceled();
-                         result = fileq->try_pop(job)) {
+                    for (auto result = fileq->try_pop(job); !result.done(); result = fileq->try_pop(job)) {
                         if (result.gotItem()) {
                             processedByThread++;
-                            core::FileRef file = job.file;
-                            try {
-                                threadResult.trees.emplace_back(typecheckOne(ctx, move(job), opts));
-                            } catch (SorbetException &) {
-                                Exception::failInFuzzer();
-                                ctx.state.tracer().error("Exception typing file: {} (backtrace is above)",
-                                                         file.data(ctx).path());
+                            // Only actually do the work if typechecking hasn't been canceled.
+                            if (!ctx.state.wasTypecheckingCanceled()) {
+                                core::FileRef file = job.file;
+                                try {
+                                    threadResult.trees.emplace_back(typecheckOne(ctx, move(job), opts));
+                                } catch (SorbetException &) {
+                                    Exception::failInFuzzer();
+                                    ctx.state.tracer().error("Exception typing file: {} (backtrace is above)",
+                                                             file.data(ctx).path());
+                                }
                             }
                         }
                     }
@@ -991,9 +981,9 @@ ast::ParsedFilesOrCancelled typecheck(unique_ptr<core::GlobalState> &gs, vector<
                     }
                     cfgInferProgress.reportProgress(fileq->doneEstimate());
                     gs->errorQueue->flushErrors();
-                    if (ctx.state.wasTypecheckingCanceled()) {
-                        return ast::ParsedFilesOrCancelled();
-                    }
+                }
+                if (ctx.state.wasTypecheckingCanceled()) {
+                    return ast::ParsedFilesOrCancelled();
                 }
             }
         }

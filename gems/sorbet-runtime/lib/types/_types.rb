@@ -65,6 +65,10 @@ module T
     T::Types::SelfType.new
   end
 
+  # TODO(jez) Matches the instance type in a singleton-class context
+  def self.attached_class
+    T::Types::AttachedClassType.new
+  end
   # Matches the instance type in a singleton-class context
   def self.experimental_attached_class
     T::Types::AttachedClassType.new
@@ -281,8 +285,5 @@ module T
       end
     end
   end
-
-  # When mixed into a module, indicates that Sorbet may export the CFG for methods in that module
-  module CFGExport; end
 end
 # rubocop:enable PrisonGuard/UseOpusTypesShortcut

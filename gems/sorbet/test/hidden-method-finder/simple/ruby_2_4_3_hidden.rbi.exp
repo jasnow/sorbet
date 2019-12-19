@@ -3338,10 +3338,6 @@ class Regexp
   def match?(*_); end
 end
 
-class Regexp
-  def self.union(*_); end
-end
-
 class RubyVM::InstructionSequence
   def absolute_path(); end
 
@@ -3548,6 +3544,8 @@ module Sorbet::Private::RealStdlib
   def self.real_instance_methods(mod, arg); end
 
   def self.real_is_a?(o, klass); end
+
+  def self.real_method(obj, sym); end
 
   def self.real_name(o); end
 

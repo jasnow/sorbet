@@ -44,7 +44,8 @@ const UnorderedMap<
 };
 
 // Ignore any comments that have these labels (e.g. `# typed: true`).
-const UnorderedSet<string> ignoredAssertionLabels = {"typed", "TODO", "linearization", "commented-out-error"};
+const UnorderedSet<string> ignoredAssertionLabels = {"typed", "TODO", "linearization", "commented-out-error",
+                                                     "Note",  "See"};
 
 constexpr string_view NOTHING_LABEL = "(nothing)"sv;
 constexpr string_view NULL_LABEL = "null"sv;
@@ -888,7 +889,7 @@ FastPathAssertion::FastPathAssertion(string_view filename, unique_ptr<Range> &ra
 void FastPathAssertion::check(SorbetTypecheckRunInfo &info, string_view folder, int updateVersion,
                               string_view errorPrefix) {
     string updateFile = fmt::format("{}.{}.rbupdate", filename.substr(0, -3), updateVersion);
-    if (!info.tookFastPath) {
+    if (!info.fastPath) {
         ADD_FAILURE_AT(updateFile.c_str(), assertionLine)
             << errorPrefix << "Expected file update to take fast path, but it took the slow path.";
     }

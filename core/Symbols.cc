@@ -1,5 +1,6 @@
 #include "core/Symbols.h"
 #include "absl/strings/match.h"
+#include "absl/strings/str_replace.h"
 #include "common/JSON.h"
 #include "common/Levenstein.h"
 #include "common/formatting.h"
@@ -607,8 +608,13 @@ string Symbol::toStringWithOptions(const GlobalState &gs, int tabs, bool showFul
         }
     }
     if (this->resultType && !isClassOrModule()) {
-        fmt::format_to(buf, " -> {}",
-                       showRaw ? this->resultType->toStringWithTabs(gs, tabs) : this->resultType->show(gs));
+        string resultType;
+        if (showRaw) {
+            resultType = absl::StrReplaceAll(this->resultType->toStringWithTabs(gs, tabs), {{"\n", " "}});
+        } else {
+            resultType = this->resultType->show(gs);
+        }
+        fmt::format_to(buf, " -> {}", resultType);
     }
     if (!locs_.empty()) {
         fmt::format_to(buf, " @ ");
@@ -666,37 +672,38 @@ string Symbol::toStringWithOptions(const GlobalState &gs, int tabs, bool showFul
         }
     }
 
+    ENFORCE(!absl::c_any_of(to_string(buf), [](char c) { return c == '\n'; }));
+
     fmt::format_to(buf, "\n");
-    if (!isMethod()) {
-        for (auto pair : membersStableOrderSlow(gs)) {
-            if (!pair.second.exists()) {
-                ENFORCE(ref(gs) == core::Symbols::root());
-                continue;
-            }
-
-            if (pair.first == Names::singleton() || pair.first == Names::attached() ||
-                pair.first == Names::classMethods()) {
-                continue;
-            }
-
-            if (!showFull && pair.second.data(gs)->isHiddenFromPrinting(gs)) {
-                bool hadPrintableChild = false;
-                for (auto childPair : pair.second.data(gs)->members()) {
-                    if (!childPair.second.data(gs)->isHiddenFromPrinting(gs)) {
-                        hadPrintableChild = true;
-                        break;
-                    }
-                }
-                if (!hadPrintableChild) {
-                    continue;
-                }
-            }
-
-            auto str = pair.second.data(gs)->toStringWithOptions(gs, tabs + 1, showFull, showRaw);
-            ENFORCE(!str.empty());
-            fmt::format_to(buf, "{}", move(str));
+    for (auto pair : membersStableOrderSlow(gs)) {
+        if (!pair.second.exists()) {
+            ENFORCE(ref(gs) == core::Symbols::root());
+            continue;
         }
-    } else {
+
+        if (pair.first == Names::singleton() || pair.first == Names::attached() ||
+            pair.first == Names::classMethods()) {
+            continue;
+        }
+
+        if (!showFull && pair.second.data(gs)->isHiddenFromPrinting(gs)) {
+            bool hadPrintableChild = false;
+            for (auto childPair : pair.second.data(gs)->members()) {
+                if (!childPair.second.data(gs)->isHiddenFromPrinting(gs)) {
+                    hadPrintableChild = true;
+                    break;
+                }
+            }
+            if (!hadPrintableChild) {
+                continue;
+            }
+        }
+
+        auto str = pair.second.data(gs)->toStringWithOptions(gs, tabs + 1, showFull, showRaw);
+        ENFORCE(!str.empty());
+        fmt::format_to(buf, "{}", move(str));
+    }
+    if (isMethod()) {
         for (auto &arg : arguments()) {
             auto str = arg.toString(gs);
             ENFORCE(!str.empty());
@@ -755,6 +762,12 @@ string Symbol::show(const GlobalState &gs) const {
 
     if (!this->owner.exists() || this->owner == Symbols::root()) {
         return this->name.data(gs)->show(gs);
+    }
+
+    if (this->name == core::Names::Constants::AttachedClass()) {
+        auto attached = this->owner.data(gs)->attachedClass(gs);
+        ENFORCE(attached.exists());
+        return fmt::format("T.attached_class (of {})", attached.data(gs)->show(gs));
     }
 
     if (this->isMethod() && this->owner.data(gs)->isClassOrModule() && this->owner.data(gs)->isSingletonClass(gs)) {

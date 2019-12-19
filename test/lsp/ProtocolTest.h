@@ -43,13 +43,16 @@ protected:
     /** Get an absolute file URI for the given relative file path. */
     std::string getUri(std::string_view filePath);
 
-    std::vector<std::unique_ptr<LSPMessage>> initializeLSP();
+    std::vector<std::unique_ptr<LSPMessage>>
+    initializeLSP(bool supportsMarkdown = true,
+                  std::optional<std::unique_ptr<SorbetInitializationOptions>> opts = std::nullopt);
 
     std::unique_ptr<LSPMessage> openFile(std::string_view path, std::string_view contents);
 
     std::unique_ptr<LSPMessage> closeFile(std::string_view path);
 
-    std::unique_ptr<LSPMessage> changeFile(std::string_view path, std::string_view newContents, int version);
+    std::unique_ptr<LSPMessage> changeFile(std::string_view path, std::string_view newContents, int version,
+                                           bool cancellationExpected = false);
 
     std::unique_ptr<LSPMessage> documentSymbol(std::string_view path);
 
@@ -71,6 +74,12 @@ protected:
 
     std::vector<std::unique_ptr<LSPMessage>> send(std::vector<std::unique_ptr<LSPMessage>> messages);
 
+    void sendAsyncRaw(const std::string &json);
+
+    void sendAsync(const LSPMessage &message);
+
+    std::unique_ptr<LSPMessage> readAsync();
+
     void assertDiagnostics(std::vector<std::unique_ptr<LSPMessage>> messages, std::vector<ExpectedDiagnostic> expected);
 
     std::string readFile(std::string_view uri);
@@ -83,6 +92,7 @@ protected:
      * invokes getLSPResponsesFor on lspWrapper, it should update diagnostics with this function.
      */
     void updateDiagnostics(const std::vector<std::unique_ptr<LSPMessage>> &messages);
+    void updateDiagnostics(const LSPMessage &message);
 };
 
 } // namespace sorbet::test::lsp

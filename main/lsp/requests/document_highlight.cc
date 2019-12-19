@@ -64,16 +64,19 @@ LSPLoop::handleTextDocumentDocumentHighlight(LSPTypechecker &typechecker, const 
             // If file is untyped, only supports find reference requests from constants and class definitions.
             if (auto constResp = resp->isConstant()) {
                 response->result = getHighlightsToSymbolInFile(typechecker, uri, constResp->symbol);
+            } else if (auto fieldResp = resp->isField()) {
+                response->result = getHighlightsToSymbolInFile(typechecker, uri, fieldResp->symbol);
             } else if (auto defResp = resp->isDefinition()) {
                 if (fileIsTyped || defResp->symbol.data(gs)->isClassOrModule()) {
                     response->result = getHighlightsToSymbolInFile(typechecker, uri, defResp->symbol);
                 }
             } else if (fileIsTyped && resp->isIdent()) {
                 auto identResp = resp->isIdent();
-                auto loc = identResp->owner.data(gs)->loc();
+                auto loc = identResp->termLoc;
                 if (loc.exists()) {
                     auto run2 = typechecker.query(
-                        core::lsp::Query::createVarQuery(identResp->owner, identResp->variable), {loc.file()});
+                        core::lsp::Query::createVarQuery(identResp->enclosingMethod, identResp->variable),
+                        {loc.file()});
                     auto locations = extractLocations(gs, run2.responses);
                     response->result = locationsToDocumentHighlights(move(locations));
                 }

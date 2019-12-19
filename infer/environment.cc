@@ -397,7 +397,7 @@ void Environment::updateKnowledge(core::Context ctx, core::LocalVariable local, 
     if (send->args.empty()) {
         return;
     }
-    if (send->fun == core::Names::kind_of() || send->fun == core::Names::is_a_p()) {
+    if (send->fun == core::Names::kindOf_p() || send->fun == core::Names::isA_p()) {
         if (!knowledgeFilter.isNeeded(local)) {
             return;
         }
@@ -831,7 +831,7 @@ core::TypePtr Environment::processBinding(core::Context ctx, cfg::Binding &bind,
 
                 if (lspQueryMatch) {
                     core::lsp::QueryResponse::pushQueryResponse(
-                        ctx, core::lsp::IdentResponse(ctx.owner, bind.loc, i->what, tp));
+                        ctx, core::lsp::IdentResponse(bind.loc, i->what, tp, ctx.owner));
                 }
 
                 ENFORCE((bind.loc.exists() && bind.loc.file().data(ctx).hasParseErrors) || !tp.origins.empty(),
@@ -1014,8 +1014,7 @@ core::TypePtr Environment::processBinding(core::Context ctx, cfg::Binding &bind,
                 tp.origins.emplace_back(bind.loc);
 
                 if (lspQueryMatch) {
-                    core::lsp::QueryResponse::pushQueryResponse(ctx,
-                                                                core::lsp::LiteralResponse(ctx.owner, bind.loc, tp));
+                    core::lsp::QueryResponse::pushQueryResponse(ctx, core::lsp::LiteralResponse(bind.loc, tp));
                 }
             },
             [&](cfg::TAbsurd *i) {

@@ -61,11 +61,11 @@ begin
     <emptyTree>
 
     def newer(<blk>)
-      <self>.new()
+      ::<Magic>.<self-new>(<self>)
     end
 
     def self.<static-init>(<blk>)
-      <emptyTree>
+      <self>.include(::MM)
     end
   end
   class ::B<<C B>> < (::<todo sym>)
@@ -74,11 +74,11 @@ begin
     <emptyTree>
 
     def self.newer(<blk>)
-      <self>.new()
+      ::<Magic>.<self-new>(<self>)
     end
 
     def self.<static-init>(<blk>)
-      ::Sorbet::Private::Static.keep_for_ide(::MM)
+      <self>.extend(::MM)
     end
   end
   class ::C<<C C>> < (::A)
